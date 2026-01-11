@@ -7,7 +7,7 @@ ckpts/
 checkpoints/
 wandb/
 results/
-inference_input
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
