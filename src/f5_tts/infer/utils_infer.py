@@ -143,6 +143,40 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
     return vocoder
 
 
+def mel_to_wave(
+    mel: torch.Tensor,
+    vocoder,
+    mel_spec_type: str = "vocos",
+    rms: float | None = None,
+    target_rms_value: float = target_rms,
+) -> np.ndarray:
+    """
+    Convert a mel spectrogram to waveform using the loaded vocoder.
+    Took the code from Lines 534-545
+
+    """
+    if mel.dim() == 2:
+        # [n_mels, T] -> [1, n_mels, T]
+        mel = mel.unsqueeze(0)
+    elif mel.dim() != 3:
+        raise ValueError(f"mel_to_wave expects 2D or 3D tensor, got shape {tuple(mel.shape)}")
+
+    mel = mel.to(torch.float32).to(device)
+
+    with torch.inference_mode():
+        if mel_spec_type == "vocos":
+            wave = vocoder.decode(mel)
+        elif mel_spec_type == "bigvgan":
+            wave = vocoder(mel)
+        else:
+            raise ValueError(f"Unsupported mel_spec_type: {mel_spec_type}")
+
+        if rms is not None and rms < target_rms_value:
+            wave = wave * rms / target_rms_value
+
+        return wave.squeeze().cpu().numpy()
+
+
 # load asr pipeline
 
 asr_pipe = None

@@ -13,7 +13,7 @@ class ECAPASpeakerReward:
 
     # f5_tts/eval/ecapa_tdnn.py의 evaluation method를 가져옴
     def __init__(self, ckpt_path: str | Path, device: Optional[str] = None):
-        ckpt_path = Path("/springbrook/share/maths/mausfc/F5-TTS_Reward-Alignment/checkpoints/UniSpeech/wavlm_large_finetune.pth")
+        ckpt_path = Path("/springbrook/share/maths/mausfc/Reward_Alignment-Test/checkpoints/UniSpeech/wavlm_large_finetune.pth")
         if not ckpt_path.is_file():
             raise FileNotFoundError(f"ECAPA checkpoint not found: {ckpt_path}")
 
