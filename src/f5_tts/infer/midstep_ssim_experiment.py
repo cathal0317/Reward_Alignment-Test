@@ -45,8 +45,8 @@ from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 
 
 MAIN_CONFIG = {
-    "ref_audio": "inference_input/Angry_1.wav",
-    "ref_text": "Dogs are sitting by the door.",
+    "ref_audio": "inference_input/0020_000337_neutral.wav",
+    "ref_text": "But mom I ma not certain about.",
     "gen_text": (
         "The time varying concentrations of pollutant can be modelled by "
         "diffusion-advection reaction equations."
@@ -55,9 +55,9 @@ MAIN_CONFIG = {
     "model_name": "F5TTS_v1_Base",
     "ckpt_step": 1250000,
     "ckpt_type": "safetensors",
-    "num_runs": 3,
+    "num_runs": 1,
     "ode_steps": 32,
-    "time_indices": [0, 10, 20, 30],
+    "time_indices": [],
 }
 
 
@@ -196,11 +196,15 @@ def run_midstep_experiment() -> None:
         print(f"[RUN {run_idx}] trajectory steps: {num_traj_steps}")
 
         # 7) For selected time indices, decode to wav + compute S-SIM
-        for t_idx in time_indices:
+        for t_idx in range(32):
             if t_idx > num_traj_steps:
                 continue
             xt = trajectory[t_idx][0]  # [T, C]
-            mel_t = xt.permute(1, 0)   # [C, T] = [n_mels, T]
+            gen_t = xt[ref_audio_len:, :]      # Exclude the Reference Audio
+            if gen_t.shape[0] == 0:
+                continue                      
+
+            mel_t = gen_t.permute(1, 0)
 
             wav_np = mel_to_wave(
                 mel_t,
