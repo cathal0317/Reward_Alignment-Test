@@ -1,26 +1,9 @@
 from __future__ import annotations
 
-"""
-Mid-step inference experiment:
-
-- Fixed (ref_audio, gen_text)
-- Run CFM.sample 3 times (different seeds)
-- For each run, take trajectory at ODE time indices [0, 10, 20, 30]
-- For each mid-step mel:
-    - Convert to waveform via vocoder
-    - Save to inference_output/
-    - Compute ECAPA-based S-SIM vs reference audio and print
-
-Usage (from repo root):
-
-    PYTHONPATH=src:$PYTHONPATH python -m f5_tts.infer.midstep_ssim_experiment
-
-Adjust constants in `MAIN_CONFIG` if needed.
-"""
-
 from pathlib import Path
 from typing import List, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import soundfile as sf
 import torch
@@ -45,19 +28,18 @@ from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 
 
 MAIN_CONFIG = {
-    "ref_audio": "inference_input/0020_000337_neutral.wav",
-    "ref_text": "But mom I ma not certain about.",
+    "ref_audio": "src/f5_tts/infer/examples/basic/basic_ref_en.wav",
+    "ref_text": "Some calls me nature others call me mother nature.",
     "gen_text": (
         "The time varying concentrations of pollutant can be modelled by "
         "diffusion-advection reaction equations."
     ),
-    "output_dir": "inference_output/midsteps",
+    "output_dir": "inference_output2/midsteps",
     "model_name": "F5TTS_v1_Base",
     "ckpt_step": 1250000,
     "ckpt_type": "safetensors",
     "num_runs": 1,
     "ode_steps": 32,
-    "time_indices": [],
 }
 
 
@@ -158,7 +140,6 @@ def run_midstep_experiment() -> None:
     print(f"[INFO] Using gen_text: {cfg['gen_text']}")
 
     # 6) Run multiple trajectories with different seeds
-    time_indices: List[int] = cfg["time_indices"]
     nfe_step: int = cfg["ode_steps"]
     num_runs: int = cfg["num_runs"]
 
@@ -195,9 +176,12 @@ def run_midstep_experiment() -> None:
         num_traj_steps = trajectory.shape[0] - 1
         print(f"[RUN {run_idx}] trajectory steps: {num_traj_steps}")
 
-        # 7) For selected time indices, decode to wav + compute S-SIM
-        for t_idx in range(32):
-            if t_idx > num_traj_steps:
+        # 7) For all time indices, decode gen-part wav + compute S-SIM
+        sims: List[Tuple[int, float]] = []
+        for t_idx in range(num_traj_steps + 1):
+            xt = trajectory[t_idx][0]  # [T_total, C]
+
+            if xt.shape[0] <= ref_audio_len:
                 continue
             xt = trajectory[t_idx][0]  # [T, C]
             gen_t = xt[ref_audio_len:, :]      # Exclude the Reference Audio
@@ -219,7 +203,24 @@ def run_midstep_experiment() -> None:
             sf.write(str(out_path), wav_np.astype(np.float32), target_sample_rate)
 
             sim = reward.from_paths(gen_wav=out_path, ref_wav=ref_audio_path)
+            sims.append((t_idx, sim))
             print(f"[RUN {run_idx}] t_idx={t_idx:02d} (t≈{t_frac:.2f})  S-SIM={sim:.6f}  -> {out_path.name}")
+
+        # 8) Save S-SIM vs timestep and plot
+        if sims:
+            t_arr = np.array([s[0] for s in sims], dtype=np.float32)
+            sim_arr = np.array([s[1] for s in sims], dtype=np.float32)
+            np.save(output_root / f"run{run_idx}_ssim_vs_t.npy", np.stack([t_arr, sim_arr], axis=1))
+
+            plt.figure(figsize=(6, 4))
+            plt.plot(t_arr, sim_arr, marker="o")
+            plt.xlabel("ODE step index (t_idx)")
+            plt.ylabel("S-SIM (ECAPA)")
+            plt.title(f"S-SIM vs timestep)")
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(output_root / f"sim_vs_timestep.png", dpi=150)
+            plt.close()
 
 
 def main() -> None:
