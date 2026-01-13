@@ -9,6 +9,7 @@ wandb/
 results/
 inference_output/
 inference_output2/
+inference_output3/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

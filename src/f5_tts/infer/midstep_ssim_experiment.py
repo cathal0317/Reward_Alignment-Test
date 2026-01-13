@@ -28,13 +28,12 @@ from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 
 
 MAIN_CONFIG = {
-    "ref_audio": "src/f5_tts/infer/examples/basic/basic_ref_en.wav",
+    "ref_audio": "/springbrook/share/maths/mausfc/Reward_Alignment-Test/inference_input/0020_000692_angry.wav",
     "ref_text": "Some calls me nature others call me mother nature.",
     "gen_text": (
-        "The time varying concentrations of pollutant can be modelled by "
-        "diffusion-advection reaction equations."
+        "The time varying concentrations of pollutant can be modelled by diffusion-advection reaction equations."
     ),
-    "output_dir": "inference_output2/midsteps",
+    "output_dir": "inference_output3/midsteps",
     "model_name": "F5TTS_v1_Base",
     "ckpt_step": 1250000,
     "ckpt_type": "safetensors",
