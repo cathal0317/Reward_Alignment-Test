@@ -28,16 +28,16 @@ from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 
 
 MAIN_CONFIG = {
-    "ref_audio": "/springbrook/share/maths/mausfc/Reward_Alignment-Test/inference_input/0020_000692_angry.wav",
-    "ref_text": "Some calls me nature others call me mother nature.",
+    "ref_audio": "/springbrook/share/maths/mausfc/Reward_Alignment-Test/inference_input/Angry_female.wav",
+    "ref_text": "Dogs are sitting by the door.",
     "gen_text": (
         "The time varying concentrations of pollutant can be modelled by diffusion-advection reaction equations."
     ),
-    "output_dir": "inference_output3/midsteps",
+    "output_dir": "inference_output4",
     "model_name": "F5TTS_v1_Base",
     "ckpt_step": 1250000,
     "ckpt_type": "safetensors",
-    "num_runs": 1,
+    "num_runs": 1, 
     "ode_steps": 32,
 }
 
@@ -135,8 +135,8 @@ def run_midstep_experiment() -> None:
         audio = torch.mean(audio, dim=0, keepdim=True)
     ref_audio_len = audio.shape[-1] // hop_length
 
-    print(f"[INFO] Using ref_text: {ref_text_proc}")
-    print(f"[INFO] Using gen_text: {cfg['gen_text']}")
+    print(f"[INFO] Ref_text: {ref_text_proc}")
+    print(f"[INFO] Gen_text: {cfg['gen_text']}")
 
     # 6) Run multiple trajectories with different seeds
     nfe_step: int = cfg["ode_steps"]
@@ -193,15 +193,16 @@ def run_midstep_experiment() -> None:
                 mel_t,
                 vocoder,
                 mel_spec_type=mel_spec_type,
-                rms=ref_rms,
-                target_rms_value=target_rms,
+                # rms=ref_rms,
+                # target_rms_value=target_rms,
             )
 
             t_frac = float(t_idx) / float(max(num_traj_steps, 1))
             out_path = output_root / f"run{run_idx}_t{t_idx:02d}_t{t_frac:.2f}.wav"
             sf.write(str(out_path), wav_np.astype(np.float32), target_sample_rate)
 
-            sim = reward.from_paths(gen_wav=out_path, ref_wav=ref_audio_path)
+            # Process ref audio
+            sim = reward.from_paths(gen_wav=out_path, ref_wav=ref_audio_proc)
             sims.append((t_idx, sim))
             print(f"[RUN {run_idx}] t_idx={t_idx:02d} (t≈{t_frac:.2f})  S-SIM={sim:.6f}  -> {out_path.name}")
 
@@ -215,10 +216,10 @@ def run_midstep_experiment() -> None:
             plt.plot(t_arr, sim_arr, marker="o")
             plt.xlabel("ODE step index (t_idx)")
             plt.ylabel("S-SIM (ECAPA)")
-            plt.title(f"S-SIM vs timestep)")
+            plt.title(f"S-SIM vs timestep")
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(output_root / f"sim_vs_timestep.png", dpi=150)
+            plt.savefig(output_root / f"ssim_vs_timestep.png", dpi=150)
             plt.close()
 
 
