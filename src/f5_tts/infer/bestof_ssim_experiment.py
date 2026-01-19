@@ -11,6 +11,7 @@ from cached_path import cached_path
 from hydra.utils import get_class
 from importlib.resources import files
 from omegaconf import OmegaConf
+import tempfile
 
 from f5_tts.infer.utils_infer import (
     device,
@@ -34,11 +35,11 @@ MAIN_CONFIG = {
     "gen_text": (
         "The time varying concentrations of pollutant can be modelled by diffusion-advection reaction equations."
     ),
-    "output_dir": "inference_output_bestof",
+    # "output_dir": "inference_output_bestof",
     "model_name": "F5TTS_v1_Base",
     "ckpt_step": 1250000,
     "ckpt_type": "safetensors",
-    "num_runs": 8,  # number of independent generations (different seeds)
+    "num_runs": 100,  # number of independent generations (different seeds)
 }
 
 
@@ -104,8 +105,9 @@ def run_bestof_experiment() -> None:
 
     repo_root = Path(__file__).resolve().parents[3]  
     ref_audio_path = repo_root / cfg["ref_audio"]
-    output_root = repo_root / cfg["output_dir"]
-    output_root.mkdir(parents=True, exist_ok=True)
+    # Use a temporary directory for intermediate wavs (no long-term storage)
+    tmp_root = Path(tempfile.gettempdir()) / "f5_bestof_tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
 
     # 1) Load model + vocoder
     ema_model, vocoder = _prepare_model_and_vocoder(
@@ -155,14 +157,13 @@ def run_bestof_experiment() -> None:
             mel_spec_type=mel_spec_type,
         )
 
-        # Save generated wav
-        out_path = output_root / f"run{run_idx}_bestof.wav"
-        sf.write(str(out_path), audio_segment.astype(np.float32), sr)
-
         # Compute S-SIM between generated wav and (processed) reference audio
-        sim = reward.from_paths(gen_wav=out_path, ref_wav=ref_audio_proc)
+        # Write to a temporary wav in tmp_root just for ECAPA scoring
+        tmp_path = tmp_root / f"tmp_run{run_idx}.wav"
+        sf.write(str(tmp_path), audio_segment.astype(np.float32), sr)
+        sim = reward.from_paths(gen_wav=tmp_path, ref_wav=ref_audio_proc)
         sims.append(sim)
-        print(f"[RUN {run_idx}] S-SIM={sim:.6f}  -> {out_path.name}")
+        print(f"[RUN {run_idx}] S-SIM={sim:.6f}  -> {tmp_path.name}")
 
     # 6) Summary statistics
     sims_np = np.array(sims, dtype=np.float32)
