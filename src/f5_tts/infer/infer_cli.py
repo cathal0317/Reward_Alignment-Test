@@ -8,11 +8,14 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+import torch
+import torchaudio
 import tomli
 from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 from unidecode import unidecode
+from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 
 from f5_tts.infer.utils_infer import (
     cfg_strength,
@@ -174,6 +177,11 @@ parser.add_argument(
     type=str,
     help="Specify the device to run on",
 )
+parser.add_argument(
+    "--ssim_bestof",
+    type=int,
+    help="If > 1, generate this many candidates and select the one with highest ECAPA S-SIM.",
+)
 args = parser.parse_args()
 
 
@@ -221,6 +229,7 @@ sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef",
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
 device = args.device or config.get("device", device)
+ssim_bestof = args.ssim_bestof or config.get("ssim_bestof", 1)
 
 
 # patches for pip pkg user
@@ -295,6 +304,12 @@ ema_model = load_model(
     model_cls, model_arc, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device
 )
 
+# ECAPA-based speaker similarity model (optional, only used if ssim_bestof > 1)
+ssim_reward = None
+if ssim_bestof and ssim_bestof > 1:
+    # NOTE: ckpt_path is hard-coded inside ECAPASpeakerReward.__init__ for now.
+    ssim_reward = ECAPASpeakerReward(ckpt_path="", device=device)
+
 
 # inference process
 
@@ -306,6 +321,8 @@ def main():
     else:
         voices = config["voices"]
         voices["main"] = main_voice
+    # Pre-load and preprocess reference audio for each voice
+    ref_wavs = {}
     for voice in voices:
         print("Voice:", voice)
         print("ref_audio ", voices[voice]["ref_audio"])
@@ -313,6 +330,14 @@ def main():
             voices[voice]["ref_audio"], voices[voice]["ref_text"]
         )
         print("ref_audio_", voices[voice]["ref_audio"], "\n\n")
+        # Load reference waveform as tensor for S-SIM, if needed
+        if ssim_bestof and ssim_bestof > 1:
+            ref_audio_path = voices[voice]["ref_audio"]
+            ref_wav, ref_sr = torchaudio.load(ref_audio_path)
+            # Convert to mono if multi-channel
+            if ref_wav.dim() == 2 and ref_wav.shape[0] > 1:
+                ref_wav = ref_wav.mean(dim=0, keepdim=False)
+            ref_wavs[voice] = (ref_wav, ref_sr)
 
     generated_audio_segments = []
     reg1 = r"(?=\[\w+\])"
@@ -336,23 +361,96 @@ def main():
         local_speed = voices[voice].get("speed", speed)
         gen_text_ = text.strip()
         print(f"Voice: {voice}")
-        audio_segment, final_sample_rate, spectrogram = infer_process(
-            ref_audio_,
-            ref_text_,
-            gen_text_,
-            ema_model,
-            vocoder,
-            mel_spec_type=vocoder_name,
-            target_rms=target_rms,
-            cross_fade_duration=cross_fade_duration,
-            nfe_step=nfe_step,
-            cfg_strength=cfg_strength,
-            sway_sampling_coef=sway_sampling_coef,
-            speed=local_speed,
-            fix_duration=fix_duration,
-            device=device,
-        )
+        ## *********************************************************************************************************************************************************** ##
+        ## *********************************************************************************************************************************************************** ##
+
+        # Run inference, optionally with S-SIM-based best-of-N selection
+        if ssim_bestof and ssim_bestof > 1 and ssim_reward is not None:
+            best_ssim = None
+            best_audio_segment = None
+            best_spectrogram = None
+            worst_ssim = None
+            worst_audio_segment = None
+            worst_spectrogram = None
+
+            ref_wav_tensor, ref_sr = ref_wavs[voice]
+
+            for i in range(ssim_bestof):
+                audio_segment, final_sample_rate, spectrogram = infer_process(
+                    ref_audio_,
+                    ref_text_,
+                    gen_text_,
+                    ema_model,
+                    vocoder,
+                    mel_spec_type=vocoder_name,
+                    target_rms=target_rms,
+                    cross_fade_duration=cross_fade_duration,
+                    nfe_step=nfe_step,
+                    cfg_strength=cfg_strength,
+                    sway_sampling_coef=sway_sampling_coef,
+                    speed=local_speed,
+                    fix_duration=fix_duration,
+                    device=device,
+                )
+
+                # audio_segment is a numpy array; convert to tensor for S-SIM
+                gen_wav_tensor = torch.from_numpy(audio_segment).float()
+                ssim_tensor = ssim_reward.from_tensors(
+                    gen_wav=gen_wav_tensor,
+                    ref_wav=ref_wav_tensor,
+                    gen_sr=final_sample_rate,
+                    ref_sr=ref_sr,
+                )
+                ssim_value = float(ssim_tensor.squeeze().item())
+                print(f"  [SSIM] candidate {i}: {ssim_value:.4f}")
+
+                if best_ssim is None or ssim_value > best_ssim:
+                    best_ssim = ssim_value
+                    best_audio_segment = audio_segment
+                    best_spectrogram = spectrogram
+
+                if worst_ssim is None or ssim_value < worst_ssim:
+                    worst_ssim = ssim_value
+                    worst_audio_segment = audio_segment
+                    worst_spectrogram = spectrogram
+
+            # Optionally save the lowest S-SIM candidate for analysis
+            if worst_audio_segment is not None:
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                chunk_idx = len(generated_audio_segments)
+                worst_filename = (
+                    f"{Path(output_file).stem}_voice-{voice}_chunk-{chunk_idx}_worst_ssim.wav"
+                )
+                worst_path = os.path.join(output_dir, worst_filename)
+                sf.write(worst_path, worst_audio_segment, final_sample_rate)
+                print(f"  [SSIM] saved lowest S-SIM candidate to {worst_path} (S-SIM = {worst_ssim:.4f})")
+
+            audio_segment = best_audio_segment
+            spectrogram = best_spectrogram
+            print(f"  [SSIM] selected best candidate with S-SIM = {best_ssim:.4f}")
+        else:
+            audio_segment, final_sample_rate, spectrogram = infer_process(
+                ref_audio_,
+                ref_text_,
+                gen_text_,
+                ema_model,
+                vocoder,
+                mel_spec_type=vocoder_name,
+                target_rms=target_rms,
+                cross_fade_duration=cross_fade_duration,
+                nfe_step=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+                speed=local_speed,
+                fix_duration=fix_duration,
+                device=device,
+            )
         generated_audio_segments.append(audio_segment)
+
+## *********************************************************************************************************************************************************** ##
+## *********************************************************************************************************************************************************** ##
+
 
         if save_chunk:
             if len(gen_text_) > 200:

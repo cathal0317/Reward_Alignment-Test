@@ -11,6 +11,12 @@ inference_output/
 inference_output2/
 inference_output3/
 inference_output4/
+inference_output5/
+inference_output_FIN/
+inference_output_bestof/
+
+
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

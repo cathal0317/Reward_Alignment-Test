@@ -30,8 +30,8 @@ from f5_tts.reward.compute_ssim import ECAPASpeakerReward
 MAIN_CONFIG = {
     # Same defaults as midstep_ssim_experiment.py; edit here if needed
     # Use the packaged example ref audio (same as infer_cli default)
-    "ref_audio": "src/f5_tts/infer/examples/basic/basic_ref_en.wav",
-    "ref_text": "Some call me nature others call me mother nature.",
+    "ref_audio": "/springbrook/share/maths/mausfc/Reward_Alignment-Test/inference_input/Angry_female.wav",
+    "ref_text": "Dogs are sitting by the door.",
     "gen_text": (
         "The time varying concentrations of pollutant can be modelled by diffusion-advection reaction equations."
     ),

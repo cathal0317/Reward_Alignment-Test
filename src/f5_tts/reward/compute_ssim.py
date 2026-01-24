@@ -57,6 +57,28 @@ class ECAPASpeakerReward:
         return emb
 
     @torch.no_grad()
+    def from_tensors(
+        self,
+        gen_wav: torch.Tensor,
+        ref_wav: torch.Tensor,
+        gen_sr: int,
+        ref_sr: int,
+    ) -> torch.Tensor:
+
+        # Ensure tensors are on the right device and 2D [B, T]
+        if gen_wav.dim() == 1:
+            gen_wav = gen_wav.unsqueeze(0)
+        if ref_wav.dim() == 1:
+            ref_wav = ref_wav.unsqueeze(0)
+
+        emb1 = self._embed(gen_wav, sr=gen_sr)
+        emb2 = self._embed(ref_wav, sr=ref_sr)
+
+        # cosine_similarity over embedding dimension
+        sim = F.cosine_similarity(emb1, emb2, dim=-1)
+        return sim
+
+    @torch.no_grad()
     def from_paths(self, gen_wav: str | Path, ref_wav: str | Path) -> float:
    
         gen_wav = Path(gen_wav)
@@ -87,3 +109,29 @@ def compute_ecapa_ssim_from_paths(
  
     reward = ECAPASpeakerReward(ckpt_path=ckpt_path, device=device)
     return reward.from_paths(gen_wav=gen_wav, ref_wav=ref_wav)
+
+
+@torch.no_grad()
+def compute_ecapa_ssim_from_tensors(
+    gen_wav: torch.Tensor,
+    ref_wav: torch.Tensor,
+    gen_sr: int,
+    ref_sr: int,
+    ckpt_path: str | Path,
+    device: Optional[str] = None,
+) -> torch.Tensor:
+    """
+    Convenience wrapper to compute ECAPA S-SIM from waveform tensors.
+
+    This simply constructs `ECAPASpeakerReward` and calls `from_tensors`.
+    Prefer reusing a single `ECAPASpeakerReward` instance in a loop if you
+    are computing S-SIM many times (to avoid reloading the checkpoint).
+    """
+
+    reward = ECAPASpeakerReward(ckpt_path=ckpt_path, device=device)
+    return reward.from_tensors(
+        gen_wav=gen_wav,
+        ref_wav=ref_wav,
+        gen_sr=gen_sr,
+        ref_sr=ref_sr,
+    )
